@@ -15,10 +15,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -54,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
@@ -110,6 +113,18 @@ fun ImperiumScreen(
     )
 
     val isConnected = hidState.connectionState == HidConnectionState.CONNECTED
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    var imeShownForSession by remember(keyboardOpen) { mutableStateOf(false) }
+
+    LaunchedEffect(keyboardOpen, imeVisible) {
+        if (keyboardOpen) {
+            if (imeVisible) {
+                imeShownForSession = true
+            } else if (imeShownForSession) {
+                keyboardOpen = false
+            }
+        }
+    }
 
     LaunchedEffect(isConnected) {
         if (!isConnected && keyboardOpen) {
