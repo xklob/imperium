@@ -35,6 +35,7 @@ data class ImperiumSettings(
     val naturalScroll: Boolean = false,
     val scrollBarSide: ScrollBarSide = ScrollBarSide.RIGHT,
     val hapticsEnabled: Boolean = true,
+    val autoReconnect: Boolean = true,
     val lastHostAddress: String? = null,
 )
 
@@ -51,6 +52,7 @@ class SettingsStore(context: Context) {
         naturalScroll = prefs.getBoolean(KEY_NATURAL_SCROLL, false),
         scrollBarSide = ScrollBarSide.fromKey(prefs.getString(KEY_SCROLL_SIDE, ScrollBarSide.RIGHT.key)),
         hapticsEnabled = prefs.getBoolean(KEY_HAPTICS, true),
+        autoReconnect = prefs.getBoolean(KEY_AUTO_RECONNECT, true),
         lastHostAddress = prefs.getString(KEY_LAST_HOST, null),
     )
 
@@ -70,6 +72,7 @@ class SettingsStore(context: Context) {
             putBoolean(KEY_NATURAL_SCROLL, next.naturalScroll)
             putString(KEY_SCROLL_SIDE, next.scrollBarSide.key)
             putBoolean(KEY_HAPTICS, next.hapticsEnabled)
+            putBoolean(KEY_AUTO_RECONNECT, next.autoReconnect)
             if (next.lastHostAddress != null) {
                 putString(KEY_LAST_HOST, next.lastHostAddress)
             } else {
@@ -87,6 +90,7 @@ class SettingsStore(context: Context) {
         private const val KEY_NATURAL_SCROLL = "natural_scroll"
         private const val KEY_SCROLL_SIDE = "scroll_bar_side"
         private const val KEY_HAPTICS = "haptics_enabled"
+        private const val KEY_AUTO_RECONNECT = "auto_reconnect"
         private const val KEY_LAST_HOST = "last_host_address"
 
         const val MIN_POINTER_SPEED = 0.25f

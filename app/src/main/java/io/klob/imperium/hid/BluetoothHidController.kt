@@ -12,6 +12,8 @@ import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,9 +56,21 @@ class BluetoothHidController(
     private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
     private val callbackExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private var hidDevice: BluetoothHidDevice? = null
     private var activeHost: BluetoothDevice? = null
+
+    @Volatile
+    private var autoReconnectEnabled: Boolean = true
+    @Volatile
+    private var preferredHostAddress: String? = null
+    @Volatile
+    private var userDisconnected: Boolean = false
+    @Volatile
+    private var isForeground: Boolean = false
+    private var reconnectAttempts: Int = 0
+    private var pendingReconnectRunnable: Runnable? = null
 
     @Volatile
     private var buttonMask: Int = 0
@@ -142,6 +156,9 @@ class BluetoothHidController(
                 }
             }
             refreshBondedHosts()
+            if (registered && _state.value.connectionState == HidConnectionState.DISCONNECTED) {
+                maybeAutoReconnect(delayMs = 350L)
+            }
         }
 
         @SuppressLint("MissingPermission")
@@ -150,6 +167,9 @@ class BluetoothHidController(
                 BluetoothProfile.STATE_CONNECTED -> {
                     activeHost = device
                     buttonMask = 0
+                    userDisconnected = false
+                    reconnectAttempts = 0
+                    cancelPendingReconnect()
                     clearPendingTx()
                     _state.update {
                         it.copy(
@@ -190,6 +210,11 @@ class BluetoothHidController(
                             )
                         }
                         onDisconnected()
+                        if (!userDisconnected && isForeground && autoReconnectEnabled && reconnectAttempts < MAX_AUTO_RECONNECT_ATTEMPTS) {
+                            reconnectAttempts++
+                            val backoffMs = 1500L * reconnectAttempts
+                            maybeAutoReconnect(delayMs = backoffMs)
+                        }
                     }
                 }
             }
@@ -227,6 +252,26 @@ class BluetoothHidController(
         }
     }
 
+    fun configureAutoReconnect(enabled: Boolean, lastHostAddress: String?) {
+        autoReconnectEnabled = enabled
+        preferredHostAddress = lastHostAddress
+        if (!enabled) {
+            cancelPendingReconnect()
+        }
+    }
+
+    fun setForeground(foreground: Boolean) {
+        isForeground = foreground
+        if (foreground) {
+            reconnectAttempts = 0
+            if (_state.value.appRegistered && _state.value.connectionState == HidConnectionState.DISCONNECTED) {
+                maybeAutoReconnect(delayMs = 250L)
+            }
+        } else {
+            cancelPendingReconnect()
+        }
+    }
+
     fun start() {
         val adapter = bluetoothAdapter
         val hasPerms = hasRequiredPermissions()
@@ -244,7 +289,30 @@ class BluetoothHidController(
             adapter.getProfileProxy(context, profileListener, BluetoothProfile.HID_DEVICE)
         } else if (!_state.value.appRegistered) {
             registerApp()
+        } else if (_state.value.connectionState == HidConnectionState.DISCONNECTED) {
+            maybeAutoReconnect(delayMs = 250L)
         }
+    }
+
+    private fun maybeAutoReconnect(delayMs: Long) {
+        if (!autoReconnectEnabled || userDisconnected || !isForeground) return
+        val target = preferredHostAddress ?: return
+        if (_state.value.bondedHosts.none { it.address == target }) return
+        cancelPendingReconnect()
+        val runnable = Runnable {
+            pendingReconnectRunnable = null
+            if (!autoReconnectEnabled || userDisconnected || !isForeground) return@Runnable
+            if (_state.value.appRegistered && _state.value.connectionState == HidConnectionState.DISCONNECTED) {
+                connect(target)
+            }
+        }
+        pendingReconnectRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    private fun cancelPendingReconnect() {
+        pendingReconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingReconnectRunnable = null
     }
 
     @SuppressLint("MissingPermission")
@@ -314,6 +382,8 @@ class BluetoothHidController(
 
     @SuppressLint("MissingPermission")
     fun connect(address: String) {
+        userDisconnected = false
+        cancelPendingReconnect()
         val adapter = bluetoothAdapter ?: return
         val hid = hidDevice ?: run {
             start()
@@ -342,6 +412,8 @@ class BluetoothHidController(
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
+        userDisconnected = true
+        cancelPendingReconnect()
         releaseAllButtons()
         val hid = hidDevice ?: return
         val host = activeHost ?: return
@@ -583,6 +655,7 @@ class BluetoothHidController(
 
     @SuppressLint("MissingPermission")
     fun shutdown() {
+        cancelPendingReconnect()
         synchronized(txLock) {
             txRunning = false
             pendingDx = 0
@@ -614,5 +687,6 @@ class BluetoothHidController(
     companion object {
         // ~10ms coalescing floor (~100Hz max) keeps Bluetooth L2CAP TX queue uncongested
         private const val MIN_MOVE_INTERVAL_NS = 10_000_000L
+        private const val MAX_AUTO_RECONNECT_ATTEMPTS = 3
     }
 }

@@ -145,6 +145,13 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            LaunchedEffect(settings.autoReconnect, settings.lastHostAddress) {
+                hidController.configureAutoReconnect(
+                    enabled = settings.autoReconnect,
+                    lastHostAddress = settings.lastHostAddress,
+                )
+            }
+
             ImperiumTheme(themeMode = settings.themeMode) {
                 ImperiumScreen(
                     hidState = hidState,
@@ -178,16 +185,21 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         refreshBatteryOptimizationState()
+        val s = settingsStore.settings.value
+        hidController.configureAutoReconnect(s.autoReconnect, s.lastHostAddress)
+        hidController.setForeground(true)
         hidController.start()
     }
 
     override fun onResume() {
         super.onResume()
         refreshBatteryOptimizationState()
+        hidController.setForeground(true)
     }
 
     override fun onPause() {
         super.onPause()
+        hidController.setForeground(false)
         gestureEngine.clearDragLock()
         hidController.releaseAllButtons()
     }

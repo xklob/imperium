@@ -337,6 +337,13 @@ fun SettingsDialog(
                 onCheckedChange = { enabled -> onUpdateSettings { it.copy(hapticsEnabled = enabled) } },
             )
 
+            ToggleSettingRow(
+                label = "Auto-Reconnect",
+                subtitle = "Automatically reconnect to your last paired PC on open or after a drop.",
+                checked = settings.autoReconnect,
+                onCheckedChange = { enabled -> onUpdateSettings { it.copy(autoReconnect = enabled) } },
+            )
+
             Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(klob.line))
 
             Row(
