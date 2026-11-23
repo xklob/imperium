@@ -68,11 +68,13 @@ fun ImperiumScreen(
     settings: ImperiumSettings,
     isDragLocked: Boolean,
     isHolding: Boolean,
+    isIgnoringBatteryOptimizations: Boolean,
     gestureEngine: TrackpadGestureEngine,
     onScrollWheel: (Int) -> Unit,
     onRequestPermissions: () -> Unit,
     onEnableBluetooth: () -> Unit,
     onMakeDiscoverable: () -> Unit,
+    onRequestUnrestrictedBattery: () -> Unit,
     onConnectHost: (String) -> Unit,
     onDisconnect: () -> Unit,
     onRefreshHosts: () -> Unit,
@@ -218,6 +220,8 @@ fun ImperiumScreen(
     if (showSettingsDialog) {
         SettingsDialog(
             settings = settings,
+            isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
+            onRequestUnrestrictedBattery = onRequestUnrestrictedBattery,
             onUpdateSettings = onUpdateSettings,
             onDismiss = { showSettingsDialog = false },
         )

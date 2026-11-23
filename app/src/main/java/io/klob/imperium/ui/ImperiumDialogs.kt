@@ -196,6 +196,8 @@ fun HostsDialog(
 @Composable
 fun SettingsDialog(
     settings: ImperiumSettings,
+    isIgnoringBatteryOptimizations: Boolean,
+    onRequestUnrestrictedBattery: () -> Unit,
     onUpdateSettings: ((ImperiumSettings) -> ImperiumSettings) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -330,9 +332,34 @@ fun SettingsDialog(
 
             ToggleSettingRow(
                 label = "Haptic Feedback",
+                subtitle = "Clicks, double-clicks, right-clicks, press-and-hold, drag lock, and scroll ticks.",
                 checked = settings.hapticsEnabled,
                 onCheckedChange = { enabled -> onUpdateSettings { it.copy(hapticsEnabled = enabled) } },
             )
+
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(klob.line))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Battery Optimization", style = MaterialTheme.typography.titleSmall, color = klob.text)
+                    Text(
+                        text = if (isIgnoringBatteryOptimizations) {
+                            "Unrestricted // low-latency Bluetooth active."
+                        } else {
+                            "Disable battery throttling to reduce Bluetooth input lag."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isIgnoringBatteryOptimizations) klob.accent else klob.muted,
+                    )
+                }
+                if (!isIgnoringBatteryOptimizations) {
+                    SecondaryActionButton("DISABLE", onClick = onRequestUnrestrictedBattery)
+                }
+            }
 
             Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(klob.line))
 
@@ -433,6 +460,7 @@ private fun ToggleSettingRow(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    subtitle: String? = null,
 ) {
     val klob = LocalKlobColors.current
     Row(
@@ -441,9 +469,14 @@ private fun ToggleSettingRow(
             .heightIn(min = 44.dp)
             .clickable { onCheckedChange(!checked) },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(label, style = MaterialTheme.typography.titleSmall, color = klob.text)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.titleSmall, color = klob.text)
+            if (subtitle != null) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = klob.muted)
+            }
+        }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,

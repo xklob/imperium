@@ -4,10 +4,13 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -37,6 +40,7 @@ class MainActivity : ComponentActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isDragLocked by mutableStateOf(false)
     private var isHolding by mutableStateOf(false)
+    private var isIgnoringBatteryOptimizations by mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -146,11 +150,13 @@ class MainActivity : ComponentActivity() {
                     settings = settings,
                     isDragLocked = isDragLocked,
                     isHolding = isHolding,
+                    isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
                     gestureEngine = gestureEngine,
                     onScrollWheel = { ticks -> hidController.sendScroll(ticks) },
                     onRequestPermissions = ::requestBluetoothPermissions,
                     onEnableBluetooth = ::requestEnableBluetooth,
                     onMakeDiscoverable = ::requestDiscoverable,
+                    onRequestUnrestrictedBattery = ::requestUnrestrictedBattery,
                     onConnectHost = { address -> hidController.connect(address) },
                     onDisconnect = {
                         gestureEngine.clearDragLock()
@@ -165,7 +171,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        refreshBatteryOptimizationState()
         hidController.start()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshBatteryOptimizationState()
     }
 
     override fun onPause() {
@@ -211,5 +223,23 @@ class MainActivity : ComponentActivity() {
             putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
         }
         bluetoothIntentLauncher.launch(intent)
+    }
+
+    private fun refreshBatteryOptimizationState() {
+        val pm = getSystemService(PowerManager::class.java)
+        isIgnoringBatteryOptimizations = pm?.isIgnoringBatteryOptimizations(packageName) == true
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun requestUnrestrictedBattery() {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        runCatching { bluetoothIntentLauncher.launch(intent) }
+            .onFailure {
+                runCatching {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }
+            }
     }
 }

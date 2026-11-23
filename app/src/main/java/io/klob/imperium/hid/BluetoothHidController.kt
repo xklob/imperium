@@ -12,6 +12,7 @@ import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Process
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,13 +53,32 @@ class BluetoothHidController(
 ) {
     private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
-    private val executor = Executors.newSingleThreadExecutor()
+    private val callbackExecutor = Executors.newSingleThreadExecutor()
 
     private var hidDevice: BluetoothHidDevice? = null
     private var activeHost: BluetoothDevice? = null
 
     @Volatile
     private var buttonMask: Int = 0
+
+    // High-priority coalescing TX pump to prevent flooding the Bluetooth L2CAP queue
+    private val txLock = Object()
+    private var txRunning = true
+    private var pendingDx = 0
+    private var pendingDy = 0
+    private var pendingWheel = 0
+    private val pendingActions = ArrayDeque<() -> Unit>()
+
+    private val txThread = Thread(
+        {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
+            runTxLoop()
+        },
+        "imperium-hid-tx",
+    ).apply {
+        isDaemon = true
+        start()
+    }
 
     private val _state = MutableStateFlow(
         HidUiState(
@@ -82,6 +102,7 @@ class BluetoothHidController(
             hidDevice = null
             activeHost = null
             buttonMask = 0
+            clearPendingTx()
             _state.update {
                 it.copy(
                     profileReady = false,
@@ -129,6 +150,7 @@ class BluetoothHidController(
                 BluetoothProfile.STATE_CONNECTED -> {
                     activeHost = device
                     buttonMask = 0
+                    clearPendingTx()
                     _state.update {
                         it.copy(
                             connectionState = HidConnectionState.CONNECTED,
@@ -159,6 +181,7 @@ class BluetoothHidController(
                     if (activeHost?.address == device.address || activeHost == null) {
                         activeHost = null
                         buttonMask = 0
+                        clearPendingTx()
                         _state.update {
                             it.copy(
                                 connectionState = HidConnectionState.DISCONNECTED,
@@ -227,7 +250,7 @@ class BluetoothHidController(
             HidMouseDescriptor.DESCRIPTOR,
         )
         val outQos = BluetoothHidDeviceAppQosSettings(
-            BluetoothHidDeviceAppQosSettings.SERVICE_BEST_EFFORT,
+            BluetoothHidDeviceAppQosSettings.SERVICE_GUARANTEED,
             800,
             9,
             0,
@@ -235,7 +258,7 @@ class BluetoothHidController(
             BluetoothHidDeviceAppQosSettings.MAX,
         )
         val ok = runCatching {
-            hid.registerApp(sdp, null, outQos, executor, hidCallback)
+            hid.registerApp(sdp, null, outQos, callbackExecutor, hidCallback)
         }.getOrDefault(false)
         if (!ok) {
             _state.update { it.copy(statusNote = "Unable to register HID mouse service") }
@@ -319,57 +342,148 @@ class BluetoothHidController(
 
     fun sendMove(dx: Int, dy: Int) {
         if (dx == 0 && dy == 0) return
-        val packets = HidMouseDescriptor.splitDeltas(dx, dy, 0)
-        for ((sx, sy, _) in packets) {
-            sendRawReport(buttonMask, sx, sy, 0)
+        synchronized(txLock) {
+            pendingDx += dx
+            pendingDy += dy
+            txLock.notify()
         }
     }
 
     fun sendScroll(wheelDelta: Int) {
         if (wheelDelta == 0) return
-        val packets = HidMouseDescriptor.splitDeltas(0, 0, wheelDelta)
-        for ((_, _, sw) in packets) {
-            sendRawReport(buttonMask, 0, 0, sw)
+        synchronized(txLock) {
+            pendingWheel += wheelDelta
+            txLock.notify()
         }
     }
 
     fun setLeftButton(down: Boolean) {
-        val next = if (down) {
-            buttonMask or HidMouseDescriptor.BUTTON_LEFT
-        } else {
-            buttonMask and HidMouseDescriptor.BUTTON_LEFT.inv()
-        }
-        if (next != buttonMask) {
-            buttonMask = next
-            sendRawReport(buttonMask, 0, 0, 0)
+        enqueueAction {
+            val next = if (down) {
+                buttonMask or HidMouseDescriptor.BUTTON_LEFT
+            } else {
+                buttonMask and HidMouseDescriptor.BUTTON_LEFT.inv()
+            }
+            if (next != buttonMask) {
+                buttonMask = next
+                sendRawReport(buttonMask, 0, 0, 0)
+            }
         }
     }
 
     fun sendLeftClick() {
-        val pressed = buttonMask or HidMouseDescriptor.BUTTON_LEFT
-        sendRawReport(pressed, 0, 0, 0)
-        val released = buttonMask and HidMouseDescriptor.BUTTON_LEFT.inv()
-        buttonMask = released
-        sendRawReport(released, 0, 0, 0)
+        enqueueAction {
+            val pressed = buttonMask or HidMouseDescriptor.BUTTON_LEFT
+            sendRawReport(pressed, 0, 0, 0)
+            val released = buttonMask and HidMouseDescriptor.BUTTON_LEFT.inv()
+            buttonMask = released
+            sendRawReport(released, 0, 0, 0)
+        }
     }
 
     fun sendRightClick() {
-        val pressed = buttonMask or HidMouseDescriptor.BUTTON_RIGHT
-        sendRawReport(pressed, 0, 0, 0)
-        val released = buttonMask and HidMouseDescriptor.BUTTON_RIGHT.inv()
-        buttonMask = released
-        sendRawReport(released, 0, 0, 0)
+        enqueueAction {
+            val pressed = buttonMask or HidMouseDescriptor.BUTTON_RIGHT
+            sendRawReport(pressed, 0, 0, 0)
+            val released = buttonMask and HidMouseDescriptor.BUTTON_RIGHT.inv()
+            buttonMask = released
+            sendRawReport(released, 0, 0, 0)
+        }
     }
 
     fun sendDoubleClick() {
-        sendLeftClick()
-        sendLeftClick()
+        enqueueAction {
+            val pressed = buttonMask or HidMouseDescriptor.BUTTON_LEFT
+            val released = buttonMask and HidMouseDescriptor.BUTTON_LEFT.inv()
+            buttonMask = released
+            sendRawReport(pressed, 0, 0, 0)
+            sendRawReport(released, 0, 0, 0)
+            sendRawReport(pressed, 0, 0, 0)
+            sendRawReport(released, 0, 0, 0)
+        }
     }
 
     fun releaseAllButtons() {
-        if (buttonMask != 0) {
-            buttonMask = 0
-            sendRawReport(0, 0, 0, 0)
+        enqueueAction {
+            if (buttonMask != 0) {
+                buttonMask = 0
+                sendRawReport(0, 0, 0, 0)
+            }
+        }
+    }
+
+    private fun enqueueAction(action: () -> Unit) {
+        synchronized(txLock) {
+            pendingActions.addLast(action)
+            txLock.notify()
+        }
+    }
+
+    private fun clearPendingTx() {
+        synchronized(txLock) {
+            pendingDx = 0
+            pendingDy = 0
+            pendingWheel = 0
+            pendingActions.clear()
+        }
+    }
+
+    private fun runTxLoop() {
+        var lastMoveSentNs = 0L
+        while (true) {
+            var dx = 0
+            var dy = 0
+            var wheel = 0
+            var action: (() -> Unit)? = null
+
+            synchronized(txLock) {
+                while (txRunning && pendingActions.isEmpty() && pendingDx == 0 && pendingDy == 0 && pendingWheel == 0) {
+                    try {
+                        txLock.wait()
+                    } catch (_: InterruptedException) {
+                        return
+                    }
+                }
+                if (!txRunning) return
+
+                if (pendingActions.isNotEmpty()) {
+                    // Flush any accumulated move before executing the discrete button action
+                    dx = pendingDx
+                    dy = pendingDy
+                    wheel = pendingWheel
+                    pendingDx = 0
+                    pendingDy = 0
+                    pendingWheel = 0
+                    action = pendingActions.removeFirst()
+                } else {
+                    val nowNs = System.nanoTime()
+                    val elapsedNs = nowNs - lastMoveSentNs
+                    if (elapsedNs < MIN_MOVE_INTERVAL_NS) {
+                        val waitMs = ((MIN_MOVE_INTERVAL_NS - elapsedNs) / 1_000_000L).coerceAtLeast(1L)
+                        try {
+                            txLock.wait(waitMs)
+                        } catch (_: InterruptedException) {
+                            return
+                        }
+                        continue
+                    }
+                    dx = pendingDx
+                    dy = pendingDy
+                    wheel = pendingWheel
+                    pendingDx = 0
+                    pendingDy = 0
+                    pendingWheel = 0
+                }
+            }
+
+            if (dx != 0 || dy != 0 || wheel != 0) {
+                val packets = HidMouseDescriptor.splitDeltas(dx, dy, wheel)
+                for ((sx, sy, sw) in packets) {
+                    sendRawReport(buttonMask, sx, sy, sw)
+                }
+                lastMoveSentNs = System.nanoTime()
+            }
+            action?.invoke()
         }
     }
 
@@ -386,7 +500,20 @@ class BluetoothHidController(
 
     @SuppressLint("MissingPermission")
     fun shutdown() {
-        releaseAllButtons()
+        synchronized(txLock) {
+            txRunning = false
+            pendingDx = 0
+            pendingDy = 0
+            pendingWheel = 0
+            pendingActions.clear()
+            txLock.notifyAll()
+        }
+        txThread.interrupt()
+
+        if (buttonMask != 0) {
+            buttonMask = 0
+            sendRawReport(0, 0, 0, 0)
+        }
         val hid = hidDevice
         if (hid != null && hasRequiredPermissions()) {
             runCatching { hid.unregisterApp() }
@@ -394,10 +521,15 @@ class BluetoothHidController(
         }
         hidDevice = null
         activeHost = null
-        executor.shutdown()
+        callbackExecutor.shutdown()
     }
 
     @SuppressLint("MissingPermission")
     private fun BluetoothDevice.safeName(): String =
         runCatching { name }.getOrNull()?.takeIf { it.isNotBlank() } ?: address
+
+    companion object {
+        // ~10ms coalescing floor (~100Hz max) keeps Bluetooth L2CAP TX queue uncongested
+        private const val MIN_MOVE_INTERVAL_NS = 10_000_000L
+    }
 }
