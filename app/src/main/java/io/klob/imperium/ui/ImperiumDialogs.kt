@@ -196,7 +196,9 @@ fun HostsDialog(
 @Composable
 fun SettingsDialog(
     settings: ImperiumSettings,
+    hidState: HidUiState,
     isIgnoringBatteryOptimizations: Boolean,
+    onOpenHosts: () -> Unit,
     onRequestUnrestrictedBattery: () -> Unit,
     onUpdateSettings: ((ImperiumSettings) -> ImperiumSettings) -> Unit,
     onDismiss: () -> Unit,
@@ -237,6 +239,32 @@ fun SettingsDialog(
                     Icon(Icons.Outlined.Close, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
                 }
             }
+
+            // Bluetooth Hosts
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                val isConnected = hidState.connectionState == HidConnectionState.CONNECTED
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Bluetooth", style = MaterialTheme.typography.titleSmall, color = klob.text)
+                    Text(
+                        text = when {
+                            isConnected -> "Connected // ${hidState.connectedHostName ?: "host"}"
+                            hidState.connectionState == HidConnectionState.CONNECTING -> "Connecting..."
+                            else -> "Offline // tap Hosts to pair or connect."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isConnected) klob.accent else klob.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                SecondaryActionButton("HOSTS", onClick = onOpenHosts)
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(klob.line))
 
             // Appearance (System / Light / Dark icon selector)
             Row(

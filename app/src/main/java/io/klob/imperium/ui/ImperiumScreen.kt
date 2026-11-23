@@ -27,17 +27,14 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Bluetooth
-import androidx.compose.material.icons.outlined.BluetoothConnected
+import androidx.compose.material.icons.automirrored.outlined.VolumeDown
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.KeyboardHide
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
-import androidx.compose.material.icons.outlined.VolumeDown
-import androidx.compose.material.icons.outlined.VolumeOff
-import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -155,26 +152,11 @@ fun ImperiumScreen(
             TopBar(
                 hidState = hidState,
                 isDragLocked = isDragLocked,
-                isHolding = isHolding,
-                keyboardOpen = keyboardOpen,
-                onToggleKeyboard = {
-                    val next = !keyboardOpen
-                    keyboardOpen = next
-                    if (!next) {
-                        keyboardController?.hide()
-                    }
-                },
                 onConsumerTap = { code ->
                     if (settings.hapticsEnabled) {
                         view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                     }
                     onSendConsumerTap(code)
-                },
-                onOpenHosts = {
-                    keyboardOpen = false
-                    keyboardController?.hide()
-                    onRefreshHosts()
-                    showHostsDialog = true
                 },
                 onOpenSettings = {
                     keyboardOpen = false
@@ -192,15 +174,22 @@ fun ImperiumScreen(
 
             Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (settings.scrollBarSide == ScrollBarSide.LEFT) {
-                    EdgeScrollBar(
+                    EdgeScrollColumn(
                         scrollSpeed = settings.scrollSpeed,
                         naturalScroll = settings.naturalScroll,
                         enabled = isConnected,
+                        keyboardOpen = keyboardOpen,
                         onScrollWheel = { ticks ->
                             if (settings.hapticsEnabled) {
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             }
                             onScrollWheel(ticks)
+                        },
+                        onToggleKeyboard = {
+                            if (!isConnected) return@EdgeScrollColumn
+                            val next = !keyboardOpen
+                            keyboardOpen = next
+                            if (!next) keyboardController?.hide()
                         },
                     )
                     Box(
@@ -234,15 +223,22 @@ fun ImperiumScreen(
                             .width(1.dp)
                             .background(klob.line),
                     )
-                    EdgeScrollBar(
+                    EdgeScrollColumn(
                         scrollSpeed = settings.scrollSpeed,
                         naturalScroll = settings.naturalScroll,
                         enabled = isConnected,
+                        keyboardOpen = keyboardOpen,
                         onScrollWheel = { ticks ->
                             if (settings.hapticsEnabled) {
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             }
                             onScrollWheel(ticks)
+                        },
+                        onToggleKeyboard = {
+                            if (!isConnected) return@EdgeScrollColumn
+                            val next = !keyboardOpen
+                            keyboardOpen = next
+                            if (!next) keyboardController?.hide()
                         },
                     )
                 }
@@ -288,7 +284,13 @@ fun ImperiumScreen(
     if (showSettingsDialog) {
         SettingsDialog(
             settings = settings,
+            hidState = hidState,
             isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
+            onOpenHosts = {
+                showSettingsDialog = false
+                onRefreshHosts()
+                showHostsDialog = true
+            },
             onRequestUnrestrictedBattery = onRequestUnrestrictedBattery,
             onUpdateSettings = onUpdateSettings,
             onDismiss = { showSettingsDialog = false },
@@ -300,11 +302,7 @@ fun ImperiumScreen(
 private fun TopBar(
     hidState: HidUiState,
     isDragLocked: Boolean,
-    isHolding: Boolean,
-    keyboardOpen: Boolean,
-    onToggleKeyboard: () -> Unit,
     onConsumerTap: (Int) -> Unit,
-    onOpenHosts: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val klob = LocalKlobColors.current
@@ -315,13 +313,6 @@ private fun TopBar(
         hidState.connectionState == HidConnectionState.CONNECTING -> klob.warning
         else -> klob.muted
     }
-    val statusText = when {
-        isDragLocked -> "drag lock"
-        isHolding -> "hold"
-        isConnected -> hidState.connectedHostName ?: "connected"
-        hidState.connectionState == HidConnectionState.CONNECTING -> "connecting"
-        else -> "offline"
-    }
 
     Row(
         modifier = Modifier
@@ -331,28 +322,15 @@ private fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!isConnected) {
-            Text(
-                text = buildAnnotatedString {
-                    append("imperium ")
-                    withStyle(SpanStyle(color = klob.accent, fontWeight = FontWeight.Bold)) {
-                        append("//")
-                    }
-                    append(" ")
-                },
-                style = MaterialTheme.typography.titleMedium,
-                color = klob.text,
-                modifier = Modifier
-                    .padding(start = 4.dp)
-                    .semantics { contentDescription = "imperium" },
-            )
             Box(
                 modifier = Modifier
+                    .padding(start = 6.dp)
                     .size(7.dp)
                     .background(statusColor),
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = statusText,
+                text = if (hidState.connectionState == HidConnectionState.CONNECTING) "connecting" else "offline",
                 style = MaterialTheme.typography.bodyMedium,
                 color = klob.muted,
                 maxLines = 1,
@@ -360,92 +338,41 @@ private fun TopBar(
                 modifier = Modifier.weight(1f),
             )
         } else {
-            // Compact brand slash + status dot leaves full single-row room for media, volume & tools
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 4.dp, end = 6.dp),
-            ) {
-                Text(
-                    text = "//",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = klob.accent,
-                    modifier = Modifier.semantics { contentDescription = "imperium" },
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .background(statusColor),
-                )
-            }
-
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                CompactTopIconButton("Previous track", false, { onConsumerTap(HidKeyMap.CONSUMER_PREV_TRACK) }) {
-                    Icon(Icons.Outlined.SkipPrevious, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
+                TopIconButton("Previous track", false, { onConsumerTap(HidKeyMap.CONSUMER_PREV_TRACK) }) {
+                    Icon(Icons.Outlined.SkipPrevious, contentDescription = null, tint = klob.text, modifier = Modifier.size(22.dp))
                 }
-                CompactTopIconButton("Play or pause", false, { onConsumerTap(HidKeyMap.CONSUMER_PLAY_PAUSE) }) {
-                    Icon(Icons.Outlined.PlayArrow, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
+                TopIconButton("Play or pause", false, { onConsumerTap(HidKeyMap.CONSUMER_PLAY_PAUSE) }) {
+                    Icon(Icons.Outlined.PlayArrow, contentDescription = null, tint = klob.text, modifier = Modifier.size(22.dp))
                 }
-                CompactTopIconButton("Next track", false, { onConsumerTap(HidKeyMap.CONSUMER_NEXT_TRACK) }) {
-                    Icon(Icons.Outlined.SkipNext, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
+                TopIconButton("Next track", false, { onConsumerTap(HidKeyMap.CONSUMER_NEXT_TRACK) }) {
+                    Icon(Icons.Outlined.SkipNext, contentDescription = null, tint = klob.text, modifier = Modifier.size(22.dp))
                 }
-                CompactTopIconButton("Volume down", false, { onConsumerTap(HidKeyMap.CONSUMER_VOL_DOWN) }) {
-                    Icon(Icons.Outlined.VolumeDown, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
-                }
-                CompactTopIconButton("Mute", false, { onConsumerTap(HidKeyMap.CONSUMER_MUTE) }) {
-                    Icon(Icons.Outlined.VolumeOff, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
-                }
-                CompactTopIconButton("Volume up", false, { onConsumerTap(HidKeyMap.CONSUMER_VOL_UP) }) {
-                    Icon(Icons.Outlined.VolumeUp, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
-                }
-            }
 
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 4.dp)
-                    .width(1.dp)
-                    .height(22.dp)
-                    .background(klob.line),
-            )
-
-            CompactTopIconButton(
-                contentDescription = if (keyboardOpen) "Hide keyboard" else "Show keyboard",
-                active = keyboardOpen,
-                onClick = onToggleKeyboard,
-            ) {
-                Icon(
-                    imageVector = if (keyboardOpen) Icons.Outlined.KeyboardHide else Icons.Outlined.Keyboard,
-                    contentDescription = null,
-                    tint = if (keyboardOpen) klob.accent else klob.text,
-                    modifier = Modifier.size(20.dp),
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .width(1.dp)
+                        .height(22.dp)
+                        .background(klob.line),
                 )
+
+                TopIconButton("Volume down", false, { onConsumerTap(HidKeyMap.CONSUMER_VOL_DOWN) }) {
+                    Icon(Icons.AutoMirrored.Outlined.VolumeDown, contentDescription = null, tint = klob.text, modifier = Modifier.size(22.dp))
+                }
+                TopIconButton("Volume up", false, { onConsumerTap(HidKeyMap.CONSUMER_VOL_UP) }) {
+                    Icon(Icons.AutoMirrored.Outlined.VolumeUp, contentDescription = null, tint = klob.text, modifier = Modifier.size(22.dp))
+                }
             }
         }
 
-        CompactTopIconButton(
-            contentDescription = "Bluetooth hosts",
-            active = isConnected,
-            onClick = onOpenHosts,
-        ) {
-            Icon(
-                imageVector = if (isConnected) {
-                    Icons.Outlined.BluetoothConnected
-                } else {
-                    Icons.Outlined.Bluetooth
-                },
-                contentDescription = null,
-                tint = if (isConnected) klob.accent else klob.text,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-
-        CompactTopIconButton(
+        TopIconButton(
             contentDescription = "Settings",
             active = false,
             onClick = onOpenSettings,
@@ -454,14 +381,14 @@ private fun TopBar(
                 imageVector = Icons.Outlined.Settings,
                 contentDescription = null,
                 tint = klob.text,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(22.dp),
             )
         }
     }
 }
 
 @Composable
-private fun CompactTopIconButton(
+private fun TopIconButton(
     contentDescription: String,
     active: Boolean,
     onClick: () -> Unit,
@@ -470,8 +397,7 @@ private fun CompactTopIconButton(
     val klob = LocalKlobColors.current
     Box(
         modifier = Modifier
-            .width(38.dp)
-            .height(44.dp)
+            .size(44.dp)
             .background(if (active) klob.accentSoft else Color.Transparent)
             .border(1.dp, if (active) klob.accentBorder else Color.Transparent)
             .clickable(onClick = onClick)
@@ -689,7 +615,64 @@ private fun DisconnectedPrompt(
 }
 
 @Composable
+private fun EdgeScrollColumn(
+    scrollSpeed: Float,
+    naturalScroll: Boolean,
+    enabled: Boolean,
+    keyboardOpen: Boolean,
+    onScrollWheel: (Int) -> Unit,
+    onToggleKeyboard: () -> Unit,
+) {
+    val klob = LocalKlobColors.current
+    Column(
+        modifier = Modifier
+            .width(70.dp)
+            .fillMaxHeight(),
+    ) {
+        EdgeScrollBar(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            scrollSpeed = scrollSpeed,
+            naturalScroll = naturalScroll,
+            enabled = enabled,
+            onScrollWheel = onScrollWheel,
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(klob.line),
+        )
+
+        Box(
+            modifier = Modifier
+                .size(70.dp)
+                .background(if (keyboardOpen) klob.accentSoft else klob.surfaceElevated)
+                .clickable(enabled = enabled, onClick = onToggleKeyboard)
+                .semantics {
+                    contentDescription = if (keyboardOpen) "Hide keyboard" else "Show keyboard"
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (keyboardOpen) Icons.Outlined.KeyboardHide else Icons.Outlined.Keyboard,
+                contentDescription = null,
+                tint = when {
+                    !enabled -> klob.muted.copy(alpha = 0.45f)
+                    keyboardOpen -> klob.accent
+                    else -> klob.text
+                },
+                modifier = Modifier.size(24.dp),
+            )
+        }
+    }
+}
+
+@Composable
 private fun EdgeScrollBar(
+    modifier: Modifier = Modifier,
     scrollSpeed: Float,
     naturalScroll: Boolean,
     enabled: Boolean,
@@ -701,9 +684,7 @@ private fun EdgeScrollBar(
     var visualOffset by remember { mutableFloatStateOf(0f) }
 
     Box(
-        modifier = Modifier
-            .width(70.dp)
-            .fillMaxHeight()
+        modifier = modifier
             .background(if (isTouching) klob.hover else klob.surfaceElevated)
             .semantics { contentDescription = "Scroll bar" }
             .pointerInput(enabled, scrollSpeed, naturalScroll) {
