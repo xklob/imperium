@@ -1,9 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <!-- klob.io favicon, fitted to Android adaptive masks. -->
-    <path android:fillColor="#8BBF82" android:fillType="evenOdd" android:pathData="M32,32H76V76H32Z M35,35V73H73V35Z" />
-    <group android:translateX="36.11899" android:translateY="65.06163" android:scaleX="0.03005223" android:scaleY="-0.03005223">
-        <path android:fillColor="#F5F5F0" android:pathData="M322 -14Q200 -14 127.5 55.5Q55 125 55 265V435Q55 572 127.5 643.0Q200 714 322 714Q445 714 517.5 643.0Q590 572 590 435V265Q590 125 517.5 55.5Q445 -14 322 -14ZM322 80Q405 80 445.0 127.5Q485 175 485 261V441Q485 527 442.0 573.5Q399 620 322 620Q244 620 202.0 572.5Q160 525 160 441V261Q160 173 200.5 126.5Q241 80 322 80ZM679 0 867 249 683 493H804L933 316H949L1078 493H1200L1015 249L1203 0H1080L949 181H933L802 0Z" />
-    </group>
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Crisp geometric mouse pointer in Paradigm Green -->
+    <path
+        android:fillColor="#00FF00"
+        android:pathData="M36,26 L36,78 L49,65 L58,82 L66,78 L57,61 L75,61 Z" />
+    <!-- Subtle klob double-slash wireless accent in Paper White -->
+    <path
+        android:fillColor="#FAFAF8"
+        android:pathData="M64,27 L69,27 L63,39 L58,39 Z" />
+    <path
+        android:fillColor="#FAFAF8"
+        android:pathData="M73,27 L78,27 L72,39 L67,39 Z" />
 </vector>
