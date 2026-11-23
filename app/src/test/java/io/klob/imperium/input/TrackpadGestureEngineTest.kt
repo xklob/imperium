@@ -1,5 +1,6 @@
 package io.klob.imperium.input
 
+import io.klob.imperium.hid.HidKeyMap
 import io.klob.imperium.hid.HidMouseDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -212,5 +213,49 @@ class TrackpadGestureEngineTest {
         assertEquals(300, packets.sumOf { it.first })
         assertEquals(-260, packets.sumOf { it.second })
         assertTrue(packets.all { it.first in -127..127 && it.second in -127..127 })
+    }
+
+    @Test
+    fun liveImeDiffHandlesTypingSwipeAutocorrectAndEmptyBackspace() {
+        // Single character typed after sentinel
+        val d1 = LiveImeDiffEngine.compute(" ", " a")
+        assertEquals(0, d1.backspaces)
+        assertEquals("a", d1.inserted)
+        assertEquals(" a", d1.nextBuffer)
+
+        // Backspace on sentinel-only buffer
+        val d2 = LiveImeDiffEngine.compute(" ", "")
+        assertEquals(1, d2.backspaces)
+        assertEquals("", d2.inserted)
+        assertEquals(" ", d2.nextBuffer)
+
+        // Autocorrect "teh" -> "the"
+        val d3 = LiveImeDiffEngine.compute(" teh", " the")
+        assertEquals(2, d3.backspaces)
+        assertEquals("he", d3.inserted)
+
+        // Newline resets rolling buffer to sentinel
+        val d4 = LiveImeDiffEngine.compute(" hi", " hi\n")
+        assertEquals(0, d4.backspaces)
+        assertEquals("\n", d4.inserted)
+        assertEquals(" ", d4.nextBuffer)
+    }
+
+    @Test
+    fun hidKeyMapAndCompositeReportsEncodeCorrectly() {
+        assertEquals(0x04, HidKeyMap.forChar('a')?.usageId)
+        assertEquals(0, HidKeyMap.forChar('a')?.modifier)
+        assertEquals(HidKeyMap.MOD_LEFT_SHIFT, HidKeyMap.forChar('A')?.modifier)
+        assertEquals(HidKeyMap.KEY_ENTER, HidKeyMap.forChar('\n')?.usageId)
+
+        val kb = HidMouseDescriptor.buildKeyboardReport(HidKeyMap.MOD_LEFT_CTRL, 0x06)
+        assertEquals(8, kb.size)
+        assertEquals(HidKeyMap.MOD_LEFT_CTRL.toByte(), kb[0])
+        assertEquals(0x06.toByte(), kb[2])
+
+        val media = HidMouseDescriptor.buildConsumerReport(HidKeyMap.CONSUMER_PLAY_PAUSE)
+        assertEquals(2, media.size)
+        assertEquals(0xCD.toByte(), media[0])
+        assertEquals(0x00.toByte(), media[1])
     }
 }

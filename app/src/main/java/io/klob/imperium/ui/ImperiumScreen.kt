@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,19 +19,30 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bluetooth
 import androidx.compose.material.icons.outlined.BluetoothConnected
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.KeyboardHide
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SkipNext
+import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.compose.material.icons.outlined.VolumeDown
+import androidx.compose.material.icons.outlined.VolumeOff
+import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -55,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import io.klob.imperium.hid.HidConnectionState
+import io.klob.imperium.hid.HidKeyMap
 import io.klob.imperium.hid.HidUiState
 import io.klob.imperium.input.EdgeScrollAccumulator
 import io.klob.imperium.input.TrackpadGestureEngine
@@ -71,6 +85,11 @@ fun ImperiumScreen(
     isIgnoringBatteryOptimizations: Boolean,
     gestureEngine: TrackpadGestureEngine,
     onScrollWheel: (Int) -> Unit,
+    onSendText: (text: String, modifier: Int) -> Unit,
+    onSendBackspaces: (count: Int, modifier: Int) -> Unit,
+    onSendKeyTap: (usageId: Int, modifier: Int) -> Unit,
+    onSendConsumerTap: (usageCode: Int) -> Unit,
+    onPasteClipboard: () -> Unit,
     onRequestPermissions: () -> Unit,
     onEnableBluetooth: () -> Unit,
     onMakeDiscoverable: () -> Unit,
@@ -82,8 +101,10 @@ fun ImperiumScreen(
 ) {
     val klob = LocalKlobColors.current
     val view = LocalView.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var showHostsDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var keyboardOpen by remember { mutableStateOf(false) }
 
     val glowAlpha by animateFloatAsState(
         targetValue = if (isDragLocked) 1f else 0f,
@@ -93,12 +114,20 @@ fun ImperiumScreen(
 
     val isConnected = hidState.connectionState == HidConnectionState.CONNECTED
 
+    LaunchedEffect(isConnected) {
+        if (!isConnected && keyboardOpen) {
+            keyboardOpen = false
+            keyboardController?.hide()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(klob.surface)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
             .drawWithContent {
                 drawContent()
                 if (glowAlpha > 0.01f) {
@@ -127,11 +156,31 @@ fun ImperiumScreen(
                 hidState = hidState,
                 isDragLocked = isDragLocked,
                 isHolding = isHolding,
+                keyboardOpen = keyboardOpen,
+                onToggleKeyboard = {
+                    val next = !keyboardOpen
+                    keyboardOpen = next
+                    if (!next) {
+                        keyboardController?.hide()
+                    }
+                },
+                onConsumerTap = { code ->
+                    if (settings.hapticsEnabled) {
+                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    }
+                    onSendConsumerTap(code)
+                },
                 onOpenHosts = {
+                    keyboardOpen = false
+                    keyboardController?.hide()
                     onRefreshHosts()
                     showHostsDialog = true
                 },
-                onOpenSettings = { showSettingsDialog = true },
+                onOpenSettings = {
+                    keyboardOpen = false
+                    keyboardController?.hide()
+                    showSettingsDialog = true
+                },
             )
 
             Box(
@@ -198,6 +247,25 @@ fun ImperiumScreen(
                     )
                 }
             }
+
+            if (keyboardOpen && isConnected) {
+                KeyboardDock(
+                    onSendText = onSendText,
+                    onSendBackspaces = onSendBackspaces,
+                    onSendKeyTap = { usageId, mod ->
+                        if (settings.hapticsEnabled) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        }
+                        onSendKeyTap(usageId, mod)
+                    },
+                    onPasteClipboard = {
+                        if (settings.hapticsEnabled) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                        }
+                        onPasteClipboard()
+                    },
+                )
+            }
         }
     }
 
@@ -233,21 +301,24 @@ private fun TopBar(
     hidState: HidUiState,
     isDragLocked: Boolean,
     isHolding: Boolean,
+    keyboardOpen: Boolean,
+    onToggleKeyboard: () -> Unit,
+    onConsumerTap: (Int) -> Unit,
     onOpenHosts: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val klob = LocalKlobColors.current
+    val isConnected = hidState.connectionState == HidConnectionState.CONNECTED
     val statusColor = when {
         isDragLocked -> klob.dragLockRed
-        hidState.connectionState == HidConnectionState.CONNECTED -> klob.accent
+        isConnected -> klob.accent
         hidState.connectionState == HidConnectionState.CONNECTING -> klob.warning
         else -> klob.muted
     }
     val statusText = when {
         isDragLocked -> "drag lock"
         isHolding -> "hold"
-        hidState.connectionState == HidConnectionState.CONNECTED ->
-            hidState.connectedHostName ?: "connected"
+        isConnected -> hidState.connectedHostName ?: "connected"
         hidState.connectionState == HidConnectionState.CONNECTING -> "connecting"
         else -> "offline"
     }
@@ -256,57 +327,125 @@ private fun TopBar(
         modifier = Modifier
             .fillMaxWidth()
             .height(52.dp)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = buildAnnotatedString {
-                append("imperium ")
-                withStyle(SpanStyle(color = klob.accent, fontWeight = FontWeight.Bold)) {
-                    append("//")
+        if (!isConnected) {
+            Text(
+                text = buildAnnotatedString {
+                    append("imperium ")
+                    withStyle(SpanStyle(color = klob.accent, fontWeight = FontWeight.Bold)) {
+                        append("//")
+                    }
+                    append(" ")
+                },
+                style = MaterialTheme.typography.titleMedium,
+                color = klob.text,
+                modifier = Modifier
+                    .padding(start = 4.dp)
+                    .semantics { contentDescription = "imperium" },
+            )
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .background(statusColor),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = klob.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            // Compact brand slash + status dot leaves full single-row room for media, volume & tools
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 4.dp, end = 6.dp),
+            ) {
+                Text(
+                    text = "//",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = klob.accent,
+                    modifier = Modifier.semantics { contentDescription = "imperium" },
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .background(statusColor),
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                CompactTopIconButton("Previous track", false, { onConsumerTap(HidKeyMap.CONSUMER_PREV_TRACK) }) {
+                    Icon(Icons.Outlined.SkipPrevious, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
                 }
-                append(" ")
-            },
-            style = MaterialTheme.typography.titleMedium,
-            color = klob.text,
-            modifier = Modifier.semantics { contentDescription = "imperium" },
-        )
+                CompactTopIconButton("Play or pause", false, { onConsumerTap(HidKeyMap.CONSUMER_PLAY_PAUSE) }) {
+                    Icon(Icons.Outlined.PlayArrow, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
+                }
+                CompactTopIconButton("Next track", false, { onConsumerTap(HidKeyMap.CONSUMER_NEXT_TRACK) }) {
+                    Icon(Icons.Outlined.SkipNext, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
+                }
+                CompactTopIconButton("Volume down", false, { onConsumerTap(HidKeyMap.CONSUMER_VOL_DOWN) }) {
+                    Icon(Icons.Outlined.VolumeDown, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
+                }
+                CompactTopIconButton("Mute", false, { onConsumerTap(HidKeyMap.CONSUMER_MUTE) }) {
+                    Icon(Icons.Outlined.VolumeOff, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
+                }
+                CompactTopIconButton("Volume up", false, { onConsumerTap(HidKeyMap.CONSUMER_VOL_UP) }) {
+                    Icon(Icons.Outlined.VolumeUp, contentDescription = null, tint = klob.text, modifier = Modifier.size(20.dp))
+                }
+            }
 
-        Box(
-            modifier = Modifier
-                .size(7.dp)
-                .background(statusColor),
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (isDragLocked) klob.dragLockRed else klob.muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 4.dp)
+                    .width(1.dp)
+                    .height(22.dp)
+                    .background(klob.line),
+            )
 
-        IconSquareButton(
+            CompactTopIconButton(
+                contentDescription = if (keyboardOpen) "Hide keyboard" else "Show keyboard",
+                active = keyboardOpen,
+                onClick = onToggleKeyboard,
+            ) {
+                Icon(
+                    imageVector = if (keyboardOpen) Icons.Outlined.KeyboardHide else Icons.Outlined.Keyboard,
+                    contentDescription = null,
+                    tint = if (keyboardOpen) klob.accent else klob.text,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
+        CompactTopIconButton(
             contentDescription = "Bluetooth hosts",
-            active = hidState.connectionState == HidConnectionState.CONNECTED,
+            active = isConnected,
             onClick = onOpenHosts,
         ) {
             Icon(
-                imageVector = if (hidState.connectionState == HidConnectionState.CONNECTED) {
+                imageVector = if (isConnected) {
                     Icons.Outlined.BluetoothConnected
                 } else {
                     Icons.Outlined.Bluetooth
                 },
                 contentDescription = null,
-                tint = if (hidState.connectionState == HidConnectionState.CONNECTED) klob.accent else klob.text,
+                tint = if (isConnected) klob.accent else klob.text,
                 modifier = Modifier.size(20.dp),
             )
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
-
-        IconSquareButton(
+        CompactTopIconButton(
             contentDescription = "Settings",
             active = false,
             onClick = onOpenSettings,
@@ -322,7 +461,7 @@ private fun TopBar(
 }
 
 @Composable
-private fun IconSquareButton(
+private fun CompactTopIconButton(
     contentDescription: String,
     active: Boolean,
     onClick: () -> Unit,
@@ -331,7 +470,8 @@ private fun IconSquareButton(
     val klob = LocalKlobColors.current
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .width(38.dp)
+            .height(44.dp)
             .background(if (active) klob.accentSoft else Color.Transparent)
             .border(1.dp, if (active) klob.accentBorder else Color.Transparent)
             .clickable(onClick = onClick)

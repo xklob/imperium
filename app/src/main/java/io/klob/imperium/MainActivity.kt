@@ -3,6 +3,7 @@ package io.klob.imperium
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -153,6 +154,11 @@ class MainActivity : ComponentActivity() {
                     isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
                     gestureEngine = gestureEngine,
                     onScrollWheel = { ticks -> hidController.sendScroll(ticks) },
+                    onSendText = { text, mod -> hidController.sendText(text, mod) },
+                    onSendBackspaces = { count, mod -> hidController.sendBackspaces(count, mod) },
+                    onSendKeyTap = { usageId, mod -> hidController.sendKeyTap(usageId, mod) },
+                    onSendConsumerTap = { code -> hidController.sendConsumerTap(code) },
+                    onPasteClipboard = ::pasteClipboardToHost,
                     onRequestPermissions = ::requestBluetoothPermissions,
                     onEnableBluetooth = ::requestEnableBluetooth,
                     onMakeDiscoverable = ::requestDiscoverable,
@@ -223,6 +229,16 @@ class MainActivity : ComponentActivity() {
             putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
         }
         bluetoothIntentLauncher.launch(intent)
+    }
+
+    private fun pasteClipboardToHost() {
+        val cm = getSystemService(ClipboardManager::class.java) ?: return
+        val clip = cm.primaryClip ?: return
+        if (clip.itemCount == 0) return
+        val text = clip.getItemAt(0).coerceToText(this)?.toString().orEmpty()
+        if (text.isNotEmpty()) {
+            hidController.sendText(text)
+        }
     }
 
     private fun refreshBatteryOptimizationState() {

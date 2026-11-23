@@ -200,9 +200,18 @@ class BluetoothHidController(
         override fun onGetReport(device: BluetoothDevice, type: Byte, id: Byte, bufferSize: Int) {
             val hid = hidDevice ?: return
             if (!hasRequiredPermissions()) return
-            val report = HidMouseDescriptor.buildReport(buttonMask, 0, 0, 0)
+            val report = when (id.toInt()) {
+                HidMouseDescriptor.REPORT_ID_KEYBOARD -> HidMouseDescriptor.buildKeyboardReport(0, 0)
+                HidMouseDescriptor.REPORT_ID_CONSUMER -> HidMouseDescriptor.buildConsumerReport(0)
+                else -> HidMouseDescriptor.buildReport(buttonMask, 0, 0, 0)
+            }
+            val replyId = when (id.toInt()) {
+                HidMouseDescriptor.REPORT_ID_KEYBOARD,
+                HidMouseDescriptor.REPORT_ID_CONSUMER -> id
+                else -> HidMouseDescriptor.REPORT_ID.toByte()
+            }
             runCatching {
-                hid.replyReport(device, type, HidMouseDescriptor.REPORT_ID.toByte(), report)
+                hid.replyReport(device, type, replyId, report)
             }
         }
     }
@@ -244,9 +253,9 @@ class BluetoothHidController(
         if (!hasRequiredPermissions()) return
         val sdp = BluetoothHidDeviceAppSdpSettings(
             "imperium",
-            "imperium bluetooth mouse",
+            "imperium bluetooth mouse & keyboard",
             "klob",
-            BluetoothHidDevice.SUBCLASS1_MOUSE,
+            BluetoothHidDevice.SUBCLASS1_COMBO,
             HidMouseDescriptor.DESCRIPTOR,
         )
         val outQos = BluetoothHidDeviceAppQosSettings(
@@ -409,6 +418,58 @@ class BluetoothHidController(
                 buttonMask = 0
                 sendRawReport(0, 0, 0, 0)
             }
+            sendKeyboardReport(0, 0)
+        }
+    }
+
+    fun sendKeyTap(usageId: Int, modifier: Int = 0) {
+        enqueueAction {
+            if (modifier != 0) {
+                sendKeyboardReport(modifier, 0)
+            }
+            sendKeyboardReport(modifier, usageId)
+            sendKeyboardReport(0, 0)
+        }
+    }
+
+    fun sendText(text: String, extraModifier: Int = 0) {
+        if (text.isEmpty()) return
+        enqueueAction {
+            var pendingMod = extraModifier
+            for (ch in text) {
+                val stroke = HidKeyMap.forChar(ch) ?: continue
+                val mod = stroke.modifier or pendingMod
+                pendingMod = 0
+                if (mod != 0) {
+                    sendKeyboardReport(mod, 0)
+                }
+                sendKeyboardReport(mod, stroke.usageId)
+                sendKeyboardReport(0, 0)
+                // Brief gap prevents Windows from dropping rapid repeated characters during paste/swipe
+                try {
+                    Thread.sleep(6L)
+                } catch (_: InterruptedException) {
+                    return@enqueueAction
+                }
+            }
+        }
+    }
+
+    fun sendBackspaces(count: Int, extraModifier: Int = 0) {
+        if (count <= 0) return
+        enqueueAction {
+            repeat(count) { idx ->
+                val mod = if (idx == 0) extraModifier else 0
+                sendKeyboardReport(mod, HidKeyMap.KEY_BACKSPACE)
+                sendKeyboardReport(0, 0)
+            }
+        }
+    }
+
+    fun sendConsumerTap(usageCode: Int) {
+        enqueueAction {
+            sendConsumerReport(usageCode)
+            sendConsumerReport(0)
         }
     }
 
@@ -495,6 +556,28 @@ class BluetoothHidController(
         val report = HidMouseDescriptor.buildReport(buttons, dx, dy, wheel)
         runCatching {
             hid.sendReport(host, HidMouseDescriptor.REPORT_ID, report)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendKeyboardReport(modifier: Int, usageId: Int) {
+        val hid = hidDevice ?: return
+        val host = activeHost ?: return
+        if (!hasRequiredPermissions()) return
+        val report = HidMouseDescriptor.buildKeyboardReport(modifier, usageId)
+        runCatching {
+            hid.sendReport(host, HidMouseDescriptor.REPORT_ID_KEYBOARD, report)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendConsumerReport(usageCode: Int) {
+        val hid = hidDevice ?: return
+        val host = activeHost ?: return
+        if (!hasRequiredPermissions()) return
+        val report = HidMouseDescriptor.buildConsumerReport(usageCode)
+        runCatching {
+            hid.sendReport(host, HidMouseDescriptor.REPORT_ID_CONSUMER, report)
         }
     }
 
