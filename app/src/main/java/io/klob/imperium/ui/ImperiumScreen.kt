@@ -190,6 +190,7 @@ fun ImperiumScreen(
             Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (settings.scrollBarSide == ScrollBarSide.LEFT) {
                     EdgeScrollColumn(
+                        widthDp = settings.scrollBarWidthDp,
                         scrollSpeed = settings.scrollSpeed,
                         naturalScroll = settings.naturalScroll,
                         enabled = isConnected,
@@ -239,6 +240,7 @@ fun ImperiumScreen(
                             .background(klob.line),
                     )
                     EdgeScrollColumn(
+                        widthDp = settings.scrollBarWidthDp,
                         scrollSpeed = settings.scrollSpeed,
                         naturalScroll = settings.naturalScroll,
                         enabled = isConnected,
@@ -631,6 +633,7 @@ private fun DisconnectedPrompt(
 
 @Composable
 private fun EdgeScrollColumn(
+    widthDp: Int,
     scrollSpeed: Float,
     naturalScroll: Boolean,
     enabled: Boolean,
@@ -639,15 +642,17 @@ private fun EdgeScrollColumn(
     onToggleKeyboard: () -> Unit,
 ) {
     val klob = LocalKlobColors.current
+    val width = widthDp.dp
     Column(
         modifier = Modifier
-            .width(70.dp)
+            .width(width)
             .fillMaxHeight(),
     ) {
         EdgeScrollBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
+            tickWidthDp = (widthDp * 0.26f).coerceIn(12f, 32f),
             scrollSpeed = scrollSpeed,
             naturalScroll = naturalScroll,
             enabled = enabled,
@@ -663,7 +668,7 @@ private fun EdgeScrollColumn(
 
         Box(
             modifier = Modifier
-                .size(70.dp)
+                .size(width)
                 .background(if (keyboardOpen) klob.accentSoft else klob.surfaceElevated)
                 .clickable(enabled = enabled, onClick = onToggleKeyboard)
                 .semantics {
@@ -688,6 +693,7 @@ private fun EdgeScrollColumn(
 @Composable
 private fun EdgeScrollBar(
     modifier: Modifier = Modifier,
+    tickWidthDp: Float = 18f,
     scrollSpeed: Float,
     naturalScroll: Boolean,
     enabled: Boolean,
@@ -730,7 +736,7 @@ private fun EdgeScrollBar(
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val spacing = 18.dp.toPx()
-            val tickWidth = 18.dp.toPx()
+            val tickWidth = tickWidthDp.dp.toPx()
             val startX = (size.width - tickWidth) / 2f
             val stroke = 1.dp.toPx()
             val color = if (isTouching) klob.accent else klob.line

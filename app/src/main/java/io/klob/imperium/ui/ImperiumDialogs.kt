@@ -356,6 +356,19 @@ fun SettingsDialog(
                 }
             }
 
+            // Scroll Bar Width
+            SliderSettingRow(
+                label = "Scroll Bar Width",
+                valueText = "${settings.scrollBarWidthDp} dp",
+                value = settings.scrollBarWidthDp.toFloat(),
+                range = SettingsStore.MIN_SCROLL_WIDTH_DP.toFloat()..SettingsStore.MAX_SCROLL_WIDTH_DP.toFloat(),
+                onValueChange = { raw ->
+                    val snapped = ((raw / 2f).roundToInt() * 2)
+                        .coerceIn(SettingsStore.MIN_SCROLL_WIDTH_DP, SettingsStore.MAX_SCROLL_WIDTH_DP)
+                    onUpdateSettings { it.copy(scrollBarWidthDp = snapped) }
+                },
+            )
+
             Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(klob.line))
 
             ToggleSettingRow(
