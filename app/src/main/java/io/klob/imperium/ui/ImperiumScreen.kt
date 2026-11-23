@@ -562,7 +562,7 @@ private fun EdgeScrollBar(
 
     Box(
         modifier = Modifier
-            .width(44.dp)
+            .width(70.dp)
             .fillMaxHeight()
             .background(if (isTouching) klob.hover else klob.surfaceElevated)
             .semantics { contentDescription = "Scroll bar" }
@@ -594,7 +594,7 @@ private fun EdgeScrollBar(
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val spacing = 18.dp.toPx()
-            val tickWidth = 12.dp.toPx()
+            val tickWidth = 18.dp.toPx()
             val startX = (size.width - tickWidth) / 2f
             val stroke = 1.dp.toPx()
             val color = if (isTouching) klob.accent else klob.line
